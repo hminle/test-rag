@@ -1,15 +1,16 @@
 {
-  "timestamp": "2026-02-07T09:54:38.106234",
+  "timestamp": "2026-02-07T10:01:56.559897",
   "config": {
     "chunk_size": 600,
     "overlap": 100
   },
-  "total_files": 1,
-  "total_chunks": 170,
-  "avg_chunk_length": 516.3,
-  "min_chunk_length": 16,
+  "total_files": 2,
+  "total_chunks": 634,
+  "avg_chunk_length": 509.7,
+  "min_chunk_length": 8,
   "max_chunk_length": 600,
   "chunks_per_document": {
+    "modular-isp.pdf": 464,
     "raw-jpeg-adapter.pdf": 170
   }
 }

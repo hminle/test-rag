@@ -4,3 +4,10 @@
 2026-02-07 09:54:38,106 | INFO | Total chunks: 170
 2026-02-07 09:54:38,106 | INFO | Avg chunk length: 516.3 chars
 2026-02-07 09:54:38,106 | INFO | Chunks per doc: {'raw-jpeg-adapter.pdf': 170}
+2026-02-07 10:01:53,994 | INFO | Pipeline started
+2026-02-07 10:01:55,791 | INFO | Loaded: modular-isp.pdf → 55 document(s)
+2026-02-07 10:01:56,528 | INFO | Loaded: raw-jpeg-adapter.pdf → 22 document(s)
+2026-02-07 10:01:56,528 | INFO | Total files loaded: 2, total document objects: 77
+2026-02-07 10:01:56,559 | INFO | Total chunks: 634
+2026-02-07 10:01:56,560 | INFO | Avg chunk length: 509.7 chars
+2026-02-07 10:01:56,560 | INFO | Chunks per doc: {'modular-isp.pdf': 464, 'raw-jpeg-adapter.pdf': 170}
