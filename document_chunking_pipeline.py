@@ -1,18 +1,29 @@
 """
-Document Ingestion & Chunking Pipeline
-=======================================
-Ingests ~10 documents, cleans text, chunks with size=600 / overlap=100,
+Document Ingestion & Chunking Pipeline (LangChain)
+====================================================
+Uses LangChain community document loaders to ingest ~10 documents,
+then chunks with RecursiveCharacterTextSplitter (size=600, overlap=100),
 logs statistics, and prints sample chunks.
 
 Usage:
     python document_chunking_pipeline.py
 
 Dependencies:
-    pip install pymupdf python-docx beautifulsoup4
+    pip install langchain langchain-community langchain-text-splitters
+    pip install pypdf unstructured markdown python-docx
+
+Directory layout expected:
+    ./documents/
+        ├── report.pdf
+        ├── data.csv
+        ├── notes.md
+        ├── page.html
+        ├── script.py
+        ├── readme.txt
+        └── ...
 """
 
 import os
-import re
 import json
 import glob
 import random
@@ -20,11 +31,20 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+from langchain_community.document_loaders import (
+    CSVLoader,
+    PyPDFLoader,
+    UnstructuredHTMLLoader,
+    UnstructuredMarkdownLoader,
+    PythonLoader,
+    TextLoader,
+)
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 # ── Configuration ────────────────────────────────────────────────────────────
-CHUNK_SIZE = 600        # characters per chunk
-CHUNK_OVERLAP = 100     # overlap between consecutive chunks
+CHUNK_SIZE = 600
+CHUNK_OVERLAP = 100
 DOCS_DIR = "./documents"  # UPDATE to your documents folder
-SUPPORTED_EXTENSIONS = [".txt", ".md", ".pdf", ".docx", ".html", ".csv", ".json"]
 NUM_SAMPLES = 5
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -38,114 +58,83 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── Loader mapping by extension ──────────────────────────────────────────────
+# Each loader follows the pattern from the reference slides:
+#   loader = SomeLoader(file_path)
+#   documents = loader.load()
+LOADER_MAP = {
+    ".csv":  lambda fp: CSVLoader(file_path=fp),
+    ".pdf":  lambda fp: PyPDFLoader(fp),
+    ".html": lambda fp: UnstructuredHTMLLoader(file_path=fp),
+    ".htm":  lambda fp: UnstructuredHTMLLoader(file_path=fp),
+    ".md":   lambda fp: UnstructuredMarkdownLoader(fp),
+    ".py":   lambda fp: PythonLoader(fp),
+    ".txt":  lambda fp: TextLoader(fp, encoding="utf-8"),
+}
+
 
 # ── 1. Document Ingestion ────────────────────────────────────────────────────
 
-def load_document(filepath: str) -> str:
-    """Load a single document and return its raw text."""
-    ext = Path(filepath).suffix.lower()
+def ingest_documents(docs_dir: str):
+    """Load all supported documents from a directory using LangChain loaders."""
+    all_docs = []
+    file_doc_counts = {}
 
-    if ext in (".txt", ".md", ".csv"):
-        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-            return f.read()
+    for filepath in sorted(glob.glob(os.path.join(docs_dir, "*"))):
+        ext = Path(filepath).suffix.lower()
+        name = os.path.basename(filepath)
 
-    if ext == ".json":
-        with open(filepath, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return json.dumps(data, indent=2, ensure_ascii=False)
+        if ext not in LOADER_MAP:
+            logger.warning(f"Unsupported file type '{ext}' — skipping {name}")
+            continue
 
-    if ext == ".html":
         try:
-            from bs4 import BeautifulSoup
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-                soup = BeautifulSoup(f.read(), "html.parser")
-            return soup.get_text(separator=" ")
-        except ImportError:
-            logger.warning("bs4 not installed; reading HTML as raw text")
-            with open(filepath, "r", encoding="utf-8", errors="replace") as f:
-                return f.read()
+            loader = LOADER_MAP[ext](filepath)
+            documents = loader.load()
+            all_docs.extend(documents)
+            file_doc_counts[name] = len(documents)
+            logger.info(f"Loaded: {name} → {len(documents)} document(s)")
+        except Exception as e:
+            logger.error(f"Failed to load {name}: {e}")
 
-    if ext == ".pdf":
-        try:
-            import fitz  # PyMuPDF
-            doc = fitz.open(filepath)
-            return "\n".join(page.get_text() for page in doc)
-        except ImportError:
-            logger.error("PyMuPDF not installed. Run: pip install pymupdf")
-            return ""
-
-    if ext == ".docx":
-        try:
-            from docx import Document
-            doc = Document(filepath)
-            return "\n".join(p.text for p in doc.paragraphs)
-        except ImportError:
-            logger.error("python-docx not installed. Run: pip install python-docx")
-            return ""
-
-    logger.warning(f"Unsupported file type: {ext} — skipping {filepath}")
-    return ""
-
-
-def ingest_documents(docs_dir: str) -> dict:
-    """Scan directory and load all supported documents."""
-    documents = {}
-    for ext in SUPPORTED_EXTENSIONS:
-        for fpath in glob.glob(os.path.join(docs_dir, f"*{ext}")):
-            name = os.path.basename(fpath)
-            text = load_document(fpath)
-            if text.strip():
-                documents[name] = text
-                logger.info(f"Loaded: {name} ({len(text):,} chars)")
-            else:
-                logger.warning(f"Empty or unreadable: {name}")
-    logger.info(f"Total documents ingested: {len(documents)}")
-    return documents
+    logger.info(
+        f"Total files loaded: {len(file_doc_counts)}, "
+        f"total document objects: {len(all_docs)}"
+    )
+    return all_docs, file_doc_counts
 
 
 # ── 2. Text Cleaning ─────────────────────────────────────────────────────────
 
-def clean_text(text: str) -> str:
-    """Clean a document's text."""
+def clean_document(doc):
+    """Clean page_content in-place on a LangChain Document."""
+    import re
+
+    text = doc.page_content
+    # Remove null bytes & non-printable chars
     text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    # Normalize unicode whitespace
     text = text.replace("\u00a0", " ").replace("\u200b", "")
+    # Collapse multiple blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
+    # Collapse multiple spaces (preserve newlines)
     text = re.sub(r"[^\S\n]+", " ", text)
+    # Strip each line
     text = "\n".join(line.strip() for line in text.splitlines())
-    return text.strip()
+    doc.page_content = text.strip()
 
 
 # ── 3. Chunking ──────────────────────────────────────────────────────────────
 
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list:
-    """Split text into overlapping chunks, preferring sentence boundaries."""
-    if not text:
-        return []
-
-    chunks = []
-    start = 0
-    text_len = len(text)
-
-    while start < text_len:
-        end = start + chunk_size
-
-        if end < text_len:
-            boundary = -1
-            for sep in [". ", "! ", "? ", ".\n", "!\n", "?\n"]:
-                pos = text.rfind(sep, start + chunk_size // 2, end)
-                if pos > boundary:
-                    boundary = pos + 1
-            if boundary > start:
-                end = boundary
-        else:
-            end = text_len
-
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-
-        start = end - overlap if end < text_len else text_len
-
+def chunk_documents(documents, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
+    """Split documents using LangChain RecursiveCharacterTextSplitter."""
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=overlap,
+        length_function=len,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    chunks = text_splitter.split_documents(documents)
     return chunks
 
 
@@ -154,52 +143,63 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVE
 def main():
     logger.info("Pipeline started")
 
-    # --- Ingest ---
+    # --- Validate directory ---
     if not os.path.isdir(DOCS_DIR):
         logger.error(f"Documents directory not found: {DOCS_DIR}")
         print(f"\n❌ Directory '{DOCS_DIR}' does not exist. Update DOCS_DIR and retry.")
         return
 
-    raw_docs = ingest_documents(DOCS_DIR)
-    if not raw_docs:
-        print("\n❌ No documents found. Check DOCS_DIR and SUPPORTED_EXTENSIONS.")
+    # --- 1. Ingest ---
+    all_docs, file_doc_counts = ingest_documents(DOCS_DIR)
+    if not all_docs:
+        print("\n❌ No documents found. Check DOCS_DIR and file types.")
         return
 
-    print(f"\n✅ Ingested {len(raw_docs)} documents")
-    for name, text in raw_docs.items():
-        print(f"   • {name}: {len(text):,} chars")
+    print(f"\n✅ Ingested {len(file_doc_counts)} files → {len(all_docs)} document objects")
+    for name, count in file_doc_counts.items():
+        print(f"   • {name}: {count} doc(s)")
 
-    # --- Clean ---
-    cleaned_docs = {name: clean_text(text) for name, text in raw_docs.items()}
-    print("\n✅ Cleaning complete")
-    for name in cleaned_docs:
-        before, after = len(raw_docs[name]), len(cleaned_docs[name])
-        print(f"   • {name}: {before:,} → {after:,} chars (removed {before - after:,})")
+    # --- 2. Clean ---
+    for doc in all_docs:
+        clean_document(doc)
+    print(f"\n✅ Cleaned {len(all_docs)} documents")
 
-    # --- Chunk ---
-    all_chunks = {}
-    for name, text in cleaned_docs.items():
-        chunks = chunk_text(text)
-        all_chunks[name] = chunks
-        logger.info(f"Chunked {name}: {len(chunks)} chunks")
+    # Show sample metadata (source, row, page, etc.)
+    print("\n📄 Sample document metadata:")
+    for doc in all_docs[:3]:
+        print(
+            f"   source={doc.metadata.get('source', 'N/A')}, "
+            f"keys={list(doc.metadata.keys())}, "
+            f"content_len={len(doc.page_content)}"
+        )
 
+    # --- 3. Chunk ---
+    chunks = chunk_documents(all_docs)
     print(f"\n✅ Chunking complete (chunk_size={CHUNK_SIZE}, overlap={CHUNK_OVERLAP})")
-    for name, chunks in all_chunks.items():
-        print(f"   • {name}: {len(chunks)} chunks")
+    print(f"   Total chunks: {len(chunks)}")
 
-    # --- Statistics ---
-    flat_chunks = [c for chunks in all_chunks.values() for c in chunks]
-    chunk_lengths = [len(c) for c in flat_chunks]
+    # --- 4. Statistics ---
+    chunk_lengths = [len(c.page_content) for c in chunks]
+
+    # Chunks per source file
+    chunks_per_doc = {}
+    for c in chunks:
+        src = os.path.basename(c.metadata.get("source", "unknown"))
+        chunks_per_doc[src] = chunks_per_doc.get(src, 0) + 1
 
     stats = {
         "timestamp": datetime.now().isoformat(),
         "config": {"chunk_size": CHUNK_SIZE, "overlap": CHUNK_OVERLAP},
-        "total_documents": len(all_chunks),
-        "total_chunks": len(flat_chunks),
-        "avg_chunk_length": round(sum(chunk_lengths) / len(chunk_lengths), 1) if chunk_lengths else 0,
+        "total_files": len(file_doc_counts),
+        "total_chunks": len(chunks),
+        "avg_chunk_length": (
+            round(sum(chunk_lengths) / len(chunk_lengths), 1)
+            if chunk_lengths
+            else 0
+        ),
         "min_chunk_length": min(chunk_lengths, default=0),
         "max_chunk_length": max(chunk_lengths, default=0),
-        "chunks_per_document": {name: len(chunks) for name, chunks in all_chunks.items()},
+        "chunks_per_document": chunks_per_doc,
     }
 
     logger.info(f"Total chunks: {stats['total_chunks']}")
@@ -210,7 +210,7 @@ def main():
         json.dump(stats, f, indent=2)
 
     print("\n📊 Pipeline Statistics")
-    print(f"   Total documents: {stats['total_documents']}")
+    print(f"   Total files:     {stats['total_files']}")
     print(f"   Total chunks:    {stats['total_chunks']}")
     print(f"   Avg chunk len:   {stats['avg_chunk_length']} chars")
     print(f"   Min chunk len:   {stats['min_chunk_length']} chars")
@@ -219,14 +219,19 @@ def main():
     for name, count in stats["chunks_per_document"].items():
         print(f"     {name}: {count}")
 
-    # --- Sample Chunks ---
-    sample_indices = random.sample(range(len(flat_chunks)), min(NUM_SAMPLES, len(flat_chunks)))
+    # --- 5. Sample Chunks ---
+    sample_indices = random.sample(
+        range(len(chunks)), min(NUM_SAMPLES, len(chunks))
+    )
     print(f"\n📝 {len(sample_indices)} Sample Chunks")
     print("=" * 60)
     for i, idx in enumerate(sample_indices, 1):
-        chunk = flat_chunks[idx]
-        preview = chunk[:500] + ("..." if len(chunk) > 500 else "")
-        print(f"\n--- Sample {i} (index={idx}, length={len(chunk)} chars) ---")
+        chunk = chunks[idx]
+        src = os.path.basename(chunk.metadata.get("source", "unknown"))
+        content = chunk.page_content
+        preview = content[:500] + ("..." if len(content) > 500 else "")
+        print(f"\n--- Sample {i} | source: {src} | length: {len(content)} chars ---")
+        print(f"Metadata: {chunk.metadata}")
         print(preview)
         print()
 
@@ -235,7 +240,7 @@ def main():
     print("✅ Pipeline complete. Outputs: chunk_stats.json, chunking_pipeline.log")
     print("\nNext steps:")
     print("  git add document_chunking_pipeline.py chunk_stats.json chunking_pipeline.log")
-    print('  git commit -m "feat: add document chunking pipeline"')
+    print('  git commit -m "feat: add LangChain document chunking pipeline"')
     print("  git push origin main")
 
 
