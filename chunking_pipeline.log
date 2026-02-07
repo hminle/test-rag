@@ -1,0 +1,6 @@
+2026-02-07 09:54:37,323 | INFO | Pipeline started
+2026-02-07 09:54:38,096 | INFO | Loaded: raw-jpeg-adapter.pdf → 22 document(s)
+2026-02-07 09:54:38,096 | INFO | Total files loaded: 1, total document objects: 22
+2026-02-07 09:54:38,106 | INFO | Total chunks: 170
+2026-02-07 09:54:38,106 | INFO | Avg chunk length: 516.3 chars
+2026-02-07 09:54:38,106 | INFO | Chunks per doc: {'raw-jpeg-adapter.pdf': 170}

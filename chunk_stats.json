@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-02-07T09:54:38.106234",
+  "config": {
+    "chunk_size": 600,
+    "overlap": 100
+  },
+  "total_files": 1,
+  "total_chunks": 170,
+  "avg_chunk_length": 516.3,
+  "min_chunk_length": 16,
+  "max_chunk_length": 600,
+  "chunks_per_document": {
+    "raw-jpeg-adapter.pdf": 170
+  }
+}

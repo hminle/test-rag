@@ -238,10 +238,6 @@ def main():
     # --- Done ---
     print("=" * 60)
     print("✅ Pipeline complete. Outputs: chunk_stats.json, chunking_pipeline.log")
-    print("\nNext steps:")
-    print("  git add document_chunking_pipeline.py chunk_stats.json chunking_pipeline.log")
-    print('  git commit -m "feat: add LangChain document chunking pipeline"')
-    print("  git push origin main")
 
 
 if __name__ == "__main__":
